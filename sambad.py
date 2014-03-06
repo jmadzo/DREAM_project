@@ -1,5 +1,6 @@
 import sys
 import os
+
 getBin = lambda x, n: x >= 0 and str(bin(x))[2:].zfill(n) or "-" + str(bin(x))[3:].zfill(n)
 if __name__ == '__main__':
     with open (sys.argv[1]) as fin:
@@ -15,5 +16,3 @@ if __name__ == '__main__':
             de = list(str(bi))
 	    fh.write(str(l[0])+'\t'+bedrow+'\t'.join(de)+'\t'+str(l[9])+'\n')
 	fh.close()
-
-
