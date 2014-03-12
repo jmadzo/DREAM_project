@@ -48,6 +48,7 @@ def main():
     open_for_sortCheck = pysam.Samfile(file_name, open_mode, check_header=True)
     sortCheck = open_for_sortCheck.header['HD']['SO']
     open_for_sortCheck.close()
+    #print "something went wrong, probably missing header"
     
     print "Sorting tag:", sortCheck, "\n"
 
@@ -74,8 +75,58 @@ def main():
         else: pass
         samfile = pysam.Samfile(file_name, open_mode)
 
+    
+    print "samfile.count():\n", samfile.count('chr1', 10000, 10020)
+    print
+    print "samfile.filename:\n", samfile.filename
+    print
+    print "samfile.header:\n", samfile.header
+    print
+
+    print "\nitetare thrue reads\n"
+
     for read in samfile.fetch('chr1', 10000, 10020):
-    	print read
+    	print "read:",read
+        print 
+        print "read.aend:",read.aend
+        print "read.alen:",read.alen
+        print "read.aligned_pairs:", read.aligned_pairs
+        print "read.cigar:", read.cigar
+        print "read.cigarstring:", read.cigarstring
+        print "read.compare(self, AlignedRead other)"
+        print "read.fancy_str()"
+        print "read.flag:", read.flag
+        print "read.inferred_length:", read.inferred_length
+        print "read.is_duplicate:", read.is_duplicate
+        print "read.is_paired:", read.is_paired
+        print "read.is_proper_pair:", read.is_proper_pair
+        print "read.is_qcfail:", read.is_qcfail
+        print "read.is_read1:", read.is_read1
+        print "read.is_read2:", read.is_read2
+        print "read.is_reverse:", read.is_reverse
+        print "read.is_secondary:", read.is_secondary
+        print "read.is_unmapped:", read.is_unmapped
+        print "read.isize:", read.isize
+        print "read.mapq:", read.mapq
+        print "read.mate_is_reverse:", read.mate_is_reverse
+        print "read.mate_is_unmapped:", read.mate_is_unmapped
+        print "read.mpos:", read.mpos
+        print "read.mrnm:", read.mrnm
+        print "read.opt(self,tag)"
+        print "read.overlap(self, uint32_t start, uint32_t end)"
+        print "read.pnext:", read.pnext
+        print "read.pos:", read.pos
+        print "read.positions:", read.positions
+        print "read.qend:", read.qend
+        print "read.qlen:", read.qlen
+        print "read.qname:", read.qname
+        print "read.qqual:", read.qqual
+        print "read.qstart:", read.qstart
+        print "read.qual:", read.qual
+        print "read.query:", read.query
+        print "read.rlen:", read.rlen
+        print "read.rname:", read.rname
+        print "\n"
 
     samfile.close()
 
