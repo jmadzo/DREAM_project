@@ -36,8 +36,7 @@ def percent(M,U):
     try:
         ratio= M/(M+U)*100
     except ZeroDivisionError:
-        if M==0: ratio=None
-        else: ratio=100
+        ratio=None
     finally:
         return ratio
 
@@ -52,7 +51,6 @@ def main():
     parser.add_argument('-q', action='store', dest='mapq',type=int, help='filter MAPQ reads quality default=5',default=5)
     parser.add_argument('-v', '--verbose', action='store_true', help='increase output verbosity on the screen')
     
-
     command_line=parser.parse_args()
     input_file_path=command_line.input_file
     mapq=command_line.mapq
@@ -68,9 +66,7 @@ def main():
 
     ##################################################################################################
 
-    ###### Open file, first make sure that bam file is sorted and indexed  ###### 
-    ###### if not sort it, check for indesfile if not present create one too ###### (def open_indexed_SamFile(file_name): ... )
-    
+    ###### Open file, make sure that bam file is sorted and indexed  ######     
     if isBamSorted(file_name, open_mode)=="unsorted":
         bam_sorted=file_name_root+"_sort"
         print " File: %s, \n\t is unsorted, start sorting, this can take a while,\n\n sorted file: %s  \n\t is going to be store in current directory\n" %(file_name, bam_sorted+file_ext)
@@ -85,7 +81,7 @@ def main():
         
         samfile = pysam.Samfile(bam_sorted+file_ext, open_mode)
 
-    ### when file is already sorted open it, check for indes file if not present make one ###
+    ###### when file is already sorted open it, check for index file if not present make one ######
     else :
         if not os.path.isfile(file_name+".bai"):
             print "creating index file\n"
@@ -140,7 +136,7 @@ def main():
                 SmaI_side=read.aend-1
                 methylated=True
             else:
-                SmaI_side=None  #save to junk file
+                SmaI_side=None  #save junk -> samfile_not_SmaI_read
 
         else:
             if read.seq[:3]=="GGG":
@@ -150,7 +146,7 @@ def main():
                 SmaI_side=read.pos+3
                 methylated=True
             else:
-                SmaI_side=None #save to junk file
+                SmaI_side=None #save junk -> samfile_not_SmaI_read
 
         SmaI_side_key=("chr"+str(read.tid),SmaI_side)
 
@@ -166,7 +162,7 @@ def main():
                 samfile_reads_low_mapq.write(read)
         else:
             count_non_SmalI+=1
-            samfile_not_SmaI_read.write(read)
+            samfile_not_SmaI_read.write(read) #saving junk file
 
     samfile.close()
     samfile_used_reads.close()
