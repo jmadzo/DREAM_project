@@ -11,6 +11,7 @@ import argparse
 import pysam
 import os.path
 import collections
+import subprocess
 
 def extractFileName(input_file_path):
     '''extract file name from shell command when longer path is provided'''
@@ -33,6 +34,7 @@ def isBamSorted(file_name, open_mode):
         return sortCheck
 
 def percent(M,U):
+    '''From number of methylated and unmethylated reads calculates precentage of methylC reads handles ZeroDivisionError. No reads output: None'''
     try:
         ratio= M/(M+U)*100
     except ZeroDivisionError:
