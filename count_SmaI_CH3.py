@@ -4,14 +4,13 @@ This script asigne bowtie/bwa mapped reads to the SmaI sides and count number of
 """
 from __future__ import division
 __version__ = '0.5'
-__author__ = 'hanghang & jmadzo'
+__author__ = 'jmadzo'
 
 import sys
 import argparse
 import pysam
 import os.path
 import collections
-import subprocess
 
 def extractFileName(input_file_path):
     '''extract file name from shell command when longer path is provided'''
@@ -20,18 +19,6 @@ def extractFileName(input_file_path):
 def splitFileName(file_name):
     '''split file name to name root and extention'''
     return os.path.splitext(file_name)
-
-def isBamSorted(file_name, open_mode):
-    '''Opens BAM/Sam file and check if file is sorted '''
-    try:
-        open_for_sortCheck = pysam.Samfile(file_name, open_mode, check_header=True)
-        sortCheck = open_for_sortCheck.header['HD']['SO']
-    except Exception, e:
-        raise e, "\n Check if file has header"
-    finally:
-        open_for_sortCheck.close()
-        print "Sorting tag:", sortCheck
-        return sortCheck
 
 def percent(M,U):
     '''From number of methylated and unmethylated reads calculates precentage of methylC reads handles ZeroDivisionError. No reads output: None'''
@@ -49,14 +36,21 @@ def main():
 
     ##############################  parsing command line arguments  ################################
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('-i',action='store', dest='input_file', help='input bam file')
-    parser.add_argument('-q', action='store', dest='mapq',type=int, help='filter MAPQ reads quality default=5',default=5)
+    parser.add_argument('-i', '--input_file', action='store', dest='input_file', help='input bam file')
+    parser.add_argument('-g','--genome_table',action='store', dest='genome_table', help='table with side for your genome build',default="SmaI_sides_keys_hg19.txt")
+    parser.add_argument('-q', '--mapq', action='store', dest='mapq',type=int, help='filter MAPQ reads quality default=5',default=5)
+    parser.add_argument('-bed','--ouput_bed', action='store_true', help='ouput table will be in bed like format')
     parser.add_argument('-v', '--verbose', action='store_true', help='increase output verbosity on the screen')
+    parser.add_argument('-ob','--ouput_bam', action='store_true', help='ouput BAM files with reads falling into use/low_quqlity/unmap reads' )
+
     
     command_line=parser.parse_args()
     input_file_path=command_line.input_file
+    genome_table=command_line.genome_table
     mapq=command_line.mapq
+    bed_like=command_line.ouput_bed
     on_screen=command_line.verbose
+    bam_out=command_line.ouput_bam
 
     ###### parse file name ######
     file_name = extractFileName(input_file_path)
@@ -68,29 +62,8 @@ def main():
 
     ##################################################################################################
 
-    ###### Open file, make sure that bam file is sorted and indexed  ######     
-    if isBamSorted(file_name, open_mode)=="unsorted":
-        bam_sorted=file_name_root+"_sort"
-        print " File: %s, \n\t is unsorted, start sorting, this can take a while,\n\n sorted file: %s  \n\t is going to be store in current directory\n" %(file_name, bam_sorted+file_ext)
-        try:
-            pysam.sort(file_name, bam_sorted)
-            print "creating index file\n"
-            pysam.index(bam_sorted+file_ext)
-            
-        except Exception as err:
-            raise err
-            pass
-        
-        samfile = pysam.Samfile(bam_sorted+file_ext, open_mode)
-
-    ###### when file is already sorted open it, check for index file if not present make one ######
-    else :
-        if not os.path.isfile(file_name+".bai"):
-            print "creating index file\n"
-            pysam.index(file_name)
-        else: pass
-        samfile = pysam.Samfile(file_name, open_mode)
-
+    ###### Open file ######
+    samfile = pysam.Samfile(file_name, open_mode)
     
     ###### some pysam file stats, this is not important, would be deleted  ######
     #print "samfile.filename:", samfile.filename
@@ -104,7 +77,7 @@ def main():
 
     ###### open SmaI side file and create ordered dictionary/hash ######
     try:
-        f=open("SmaI_sides_keys.txt","r")
+        f=open(genome_table,"r")
         smai_sides=[row.strip().split('\t') for row in f]
         SmaI_DB=collections.OrderedDict([((chromosome,int(position)),({'ID':smai_ID, 'M':0, 'U':0})) for chromosome,position,smai_ID in smai_sides])
     except Exception, e:
@@ -117,10 +90,11 @@ def main():
     count_non_SmalI=0
     count_unmapped = 0
     count_read_pass = 0
-    samfile_used_reads = pysam.Samfile("out_used_reads_"+file_name, "wb", template=samfile)
-    samfile_not_SmaI_read = pysam.Samfile("out_not_SmaI_read_"+file_name, "wb", template=samfile)
-    samfile_reads_low_mapq = pysam.Samfile("out_low_mapq_reads_"+file_name, "wb", template=samfile)
-    samfile_unmmaped_reads = pysam.Samfile("out_unmmaped_reads_"+file_name, "wb", template=samfile)
+    if bam_out:
+        samfile_used_reads = pysam.Samfile(file_name+"_out_used_reads", "wb", template=samfile)
+        samfile_not_SmaI_read = pysam.Samfile(file_name+"_out_not_SmaI_read", "wb", template=samfile)
+        samfile_reads_low_mapq = pysam.Samfile(file_name+"_out_low_mapq_reads", "wb", template=samfile)
+        samfile_unmmaped_reads = pysam.Samfile(file_name+"_out_unmmaped_reads", "wb", template=samfile)
     
     for (counter, read) in enumerate(samfile.fetch(until_eof = True)):
         if counter%1000000==0: print "procesed",counter/1000000,"M reads"
@@ -157,24 +131,27 @@ def main():
                 count_read_pass+=1
                 if methylated: SmaI_DB[SmaI_side_key]['M']+=1
                 if not methylated: SmaI_DB[SmaI_side_key]['U']+=1
-                samfile_used_reads.write(read)
+                if bam_out: samfile_used_reads.write(read)
 
             else:
                 count_reads_low_mapq+=1
-                samfile_reads_low_mapq.write(read)
+                if bam_out: samfile_reads_low_mapq.write(read)
         else:
             count_non_SmalI+=1
-            samfile_not_SmaI_read.write(read) #saving junk file
+            if bam_out: samfile_not_SmaI_read.write(read) #saving junk file
 
     samfile.close()
-    samfile_used_reads.close()
-    samfile_reads_low_mapq.close()
-    samfile_not_SmaI_read.close()
-    samfile_unmmaped_reads.close()
+    try:
+        samfile_used_reads.close()
+        samfile_reads_low_mapq.close()
+        samfile_not_SmaI_read.close()
+        samfile_unmmaped_reads.close()
+    except: pass
 
     print
     count_total = counter+1
     count_mapped = count_read_pass+count_reads_low_mapq+count_non_SmalI # count_total-count_unmapped,
+
     print count_total, "total number of reads"
     print
     print "{} reads unpapped => {:.3f} %".format(count_unmapped, count_unmapped/count_total*100 )
@@ -186,14 +163,31 @@ def main():
     print
     print "count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped)
     print "mapped + unmapped -> %s + %s = %s == total -> %s" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total)
-        
+    
+    ###### Writing stats into the file ###### hack for now but it's ugly, needs to be rewritten
+    stats=open(file_name+'stats.txt', 'w')
+    stats.write("{} reads unpapped => {:.3f} %".format(count_unmapped, count_unmapped/count_total*100 ))
+    stats.write("{} reads mapped => {:.3f} %".format(count_mapped, (count_total-count_unmapped)/count_total*100 )
+    stats.write("{} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 )
+    stats.write("%s reads under %s MAPQ quality limit => %.3f %% of mapped  %.3f %% of total" %(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100)
+    stats.write("")
+    stats.write("%s of mapped reads are NOT in SmaI database => %.4f %% of mapped or %.4f %% of total" %(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100)
+    stats.write("")   
+    stats.write("count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped)
+    stats.write("mapped + unmapped -> %s + %s = %s == total -> %s" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total)
+    stats.close()
+
+
     print
-    with open('SmaI_sites_output.txt', 'w') as output:
+    with open(file_name+'_SmaI_sites.txt', 'w') as output:
         for key, value in SmaI_DB.iteritems():
             percentage = percent(value['M'], value['U'])
             if on_screen:
                 print '{0}\t{1}'.format(*key),"\t{ID}\t{M}\t{U}".format(**value),"\t{}".format(percentage)
-            output.write('{1}\t{2}\t{ID}\t{M}\t{U}\t{0}'.format(percentage, *key,**value)+"\n")
+            if bed_like:
+                output.write('{1}\t{2}\t{ID}\t{M}\t{U}\t{0}'.format(percentage, *key,**value)+"\n")
+            else:
+                output.write('{ID}\t{1}\t{2}\t{M}\t{U}\t{0}'.format(percentage, *key,**value)+"\n")
 
 
 #sys.exit("\nOK, good up here\n")
