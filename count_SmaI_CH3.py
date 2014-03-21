@@ -1,10 +1,21 @@
 #!/usr/bin/env python
 """
-This script asigne bowtie/bwa mapped reads to the SmaI sides and count number of methylated and unmethylated reads
+This script assigns bowtie/bwa mapped reads from BAM/SAM file to the all SmaI sides and count number of methylated and unmethylated reads.
+
+standard ouput format:
+SmaI_ID     chrN    pos     M   U   ratio
+SmaI_hg19_1 chr1    10498   1   0   100.0
+SmaI_hg19_2 chr1    20207   0   0   23.789
+SmaI_hg19_3 chr1    24074   0   0   None
+
+bed format ouput:
+chrN    star    end     ratio   SmaI_ID     M   U  
+chr1    10496   10498   100.0   SmaI_hg19_1 1   0
+chr1    20205   20207   None    SmaI_hg19_2 0   0
 """
 from __future__ import division
-__version__ = '0.5'
-__author__ = 'jmadzo'
+__version__ = '1.0'
+__author__ = 'Fels team'
 
 import sys
 import argparse
@@ -32,18 +43,17 @@ def percent(M,U):
 def main():
     '''main function '''
     ###################### check command line arguments ############################################
-    if len(sys.argv)==1: sys.exit('\n no arguments provided, for help: --help')
+    if len(sys.argv)==1: sys.exit(__doc__+'\n no arguments provided, for help: --help')
 
     ##############################  parsing command line arguments  ################################
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-i', '--input_file', action='store', dest='input_file', help='input bam file')
-    parser.add_argument('-g','--genome_table',action='store', dest='genome_table', help='table with side for your genome build',default="SmaI_sides_keys_hg19.txt")
+    parser.add_argument('-g','--genome_table',action='store', dest='genome_table', help='table with RE side position for accessed genome build',default="SmaI_sides_keys_hg19.txt")
     parser.add_argument('-q', '--mapq', action='store', dest='mapq',type=int, help='filter MAPQ reads quality default=5',default=5)
     parser.add_argument('-bed','--ouput_bed', action='store_true', help='ouput table will be in bed like format')
     parser.add_argument('-v', '--verbose', action='store_true', help='increase output verbosity on the screen')
-    parser.add_argument('-ob','--ouput_bam', action='store_true', help='ouput BAM files with reads falling into use/low_quqlity/unmap reads' )
+    parser.add_argument('-bam','--ouput_bam', action='store_true', help='ouput BAM files with reads falling into use/low_quality/unmap reads' )
 
-    
     command_line=parser.parse_args()
     input_file_path=command_line.input_file
     genome_table=command_line.genome_table
@@ -91,17 +101,20 @@ def main():
     count_unmapped = 0
     count_read_pass = 0
     if bam_out:
-        samfile_used_reads = pysam.Samfile(file_name+"_out_used_reads", "wb", template=samfile)
-        samfile_not_SmaI_read = pysam.Samfile(file_name+"_out_not_SmaI_read", "wb", template=samfile)
-        samfile_reads_low_mapq = pysam.Samfile(file_name+"_out_low_mapq_reads", "wb", template=samfile)
-        samfile_unmmaped_reads = pysam.Samfile(file_name+"_out_unmmaped_reads", "wb", template=samfile)
+        day_stapm="_"+tx.today()
+        path_DIR="BAM_"+file_name_root+day_stapm+"/"
+        if not os.path.exists(path_DIR): os.mkdir(path_DIR)
+        samfile_used_reads = pysam.Samfile(path_DIR+file_name_root+"_out_used_reads.bam", "wb", template=samfile)
+        samfile_not_SmaI_read = pysam.Samfile(path_DIR+file_name_root+"_out_not_SmaI_read.bam", "wb", template=samfile)
+        samfile_reads_low_mapq = pysam.Samfile(path_DIR+file_name_root+"_out_low_mapq_reads.bam", "wb", template=samfile)
+        samfile_unmmaped_reads = pysam.Samfile(path_DIR+file_name_root+"_out_unmmaped_reads.bam", "wb", template=samfile)
     
     for (counter, read) in enumerate(samfile.fetch(until_eof = True)):
         if counter%1000000==0: print "procesed",counter/1000000,"M reads"
         if read.is_unmapped:
             count_unmapped+=1
             "check_for_spike(read) ... check forspikes"
-            samfile_unmmaped_reads.write(read)
+            if bam_out: samfile_unmmaped_reads.write(read)
             continue
 
         elif read.is_reverse:
@@ -165,29 +178,31 @@ def main():
     print "mapped + unmapped -> %s + %s = %s == total -> %s" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total)
     
     ###### Writing stats into the file ###### hack for now but it's ugly, needs to be rewritten
-    stats=open(file_name+'stats.txt', 'w')
-    stats.write("{} reads unpapped => {:.3f} %".format(count_unmapped, count_unmapped/count_total*100 ))
-    stats.write("{} reads mapped => {:.3f} %".format(count_mapped, (count_total-count_unmapped)/count_total*100 )
-    stats.write("{} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 )
-    stats.write("%s reads under %s MAPQ quality limit => %.3f %% of mapped  %.3f %% of total" %(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100)
-    stats.write("")
-    stats.write("%s of mapped reads are NOT in SmaI database => %.4f %% of mapped or %.4f %% of total" %(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100)
-    stats.write("")   
-    stats.write("count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped)
-    stats.write("mapped + unmapped -> %s + %s = %s == total -> %s" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total)
+    stats=open(file_name_root+'_stats.txt', 'w')
+    stats.write("{} reads unpapped => {:.3f} %\n".format(count_unmapped, count_unmapped/count_total*100 ))
+    stats.write("{} reads mapped => {:.3f} %\n".format(count_mapped, (count_total-count_unmapped)/count_total*100 ))
+    stats.write("{} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total\n".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 ))
+    stats.write("%s reads under %s MAPQ quality limit => %.3f %% of mapped  %.3f %% of total\n" %(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100))
+    stats.write("\n")
+    stats.write("%s of mapped reads are NOT in SmaI database => %.4f %% of mapped or %.4f %% of total\n" %(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100))
+    stats.write("\n")   
+    stats.write("count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s\n" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped))
+    stats.write("mapped + unmapped -> %s + %s = %s == total -> %s\n" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total))
     stats.close()
 
 
     print
-    with open(file_name+'_SmaI_sites.txt', 'w') as output:
+    with open(file_name_root+'_SmaI_sites.txt', 'w') as output:
         for key, value in SmaI_DB.iteritems():
             percentage = percent(value['M'], value['U'])
+            coverage = value['M']+value['U']
             if on_screen:
-                print '{0}\t{1}'.format(*key),"\t{ID}\t{M}\t{U}".format(**value),"\t{}".format(percentage)
+                print '{0}\t{1}'.format(*key),"\t{ID}\t{M}\t{U}".format(**value),"\t{}\t{}".format(percentage, coverage)
             if bed_like:
-                output.write('{1}\t{2}\t{ID}\t{M}\t{U}\t{0}'.format(percentage, *key,**value)+"\n")
+                chrom,pos = key
+                output.write('{0}\t{1}\t{2}\t{3}\t{ID}\t{M}\t{U}\t{4}'.format(chrom, pos-2, pos, percentage, coverage,**value)+"\n") # now prints CpG to access CCCGGG: pos-4, pos+2
             else:
-                output.write('{ID}\t{1}\t{2}\t{M}\t{U}\t{0}'.format(percentage, *key,**value)+"\n")
+                output.write('{ID}\t{2}\t{3}\t{M}\t{U}\t{0}\t{1}'.format(percentage, coverage, *key,**value)+"\n")
 
 
 #sys.exit("\nOK, good up here\n")

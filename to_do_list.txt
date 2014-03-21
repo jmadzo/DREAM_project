@@ -1,0 +1,11 @@
+- ouput file name
+- flag for genome file
+- bam ouput swap order
+- final table order
+- spikes
+- repeats alu/ line/ LTR
+- ouput file with summary stats
+
+
+- round to integer in bed format
+- sum of the reads U+M 
