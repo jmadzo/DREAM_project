@@ -48,11 +48,13 @@ def main():
     ##############################  parsing command line arguments  ################################
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-i', '--input_file', action='store', dest='input_file', help='input bam file')
-    parser.add_argument('-g','--genome_table',action='store', dest='genome_table', help='table with RE side position for accessed genome build',default="SmaI_sides_keys_hg19.txt")
+    parser.add_argument('-g','--genome_table',action='store', dest='genome_table', help='table with RE side position for accessed genome build',default="SmaI_sites_keys_hg19.txt")
     parser.add_argument('-q', '--mapq', action='store', dest='mapq',type=int, help='filter MAPQ reads quality default=5',default=5)
     parser.add_argument('-bed','--ouput_bed', action='store_true', help='ouput table will be in bed like format')
     parser.add_argument('-v', '--verbose', action='store_true', help='increase output verbosity on the screen')
     parser.add_argument('-bam','--ouput_bam', action='store_true', help='ouput BAM files with reads falling into use/low_quality/unmap reads' )
+    parser.add_argument('-s','--silent', action='store_true', help='run in sciente mode (no screen output)')
+    #parser.add_argument('-bowtie', action='store', dest='bowtie_par', help='add bowtie parameters input files and output file include=')
 
     command_line=parser.parse_args()
     input_file_path=command_line.input_file
@@ -61,7 +63,25 @@ def main():
     bed_like=command_line.ouput_bed
     on_screen=command_line.verbose
     bam_out=command_line.ouput_bam
+    silent=command_line.silent
+    #bowtie_parameters=command_line.bowtie_par
 
+
+
+
+    ###### Bowtie call ########
+    #if bowtie_parameters:
+    #    command_bowtie= "bowtie2 " + bowtie_parameters #+ " | samtools view -bS - | samtools sort - fighetta.bam"
+    #    print command_bowtie
+    #    proc = Popen(command_bowtie, shell=True)
+    #    proc.wait()
+    #    print "done"
+        
+        # input_file_path asigne to output file
+
+
+    #else:
+    #    pass
     ###### parse file name ######
     file_name = extractFileName(input_file_path)
     file_name_root, file_ext = splitFileName(file_name)
@@ -83,7 +103,7 @@ def main():
     #header = samfile.header
     #print "samfile.header:\n", samfile.header
 
-    print "\nitetare thru reads:"
+    if not silent: print "\nitetare thru reads:"
 
     ###### open SmaI side file and create ordered dictionary/hash ######
     try:
@@ -100,6 +120,7 @@ def main():
     count_non_SmalI=0
     count_unmapped = 0
     count_read_pass = 0
+    #g=open(file_name_root+"keys_from_scripy.txt","w")
     if bam_out:
         day_stapm="_"+tx.today()
         path_DIR="BAM_"+file_name_root+day_stapm+"/"
@@ -109,10 +130,13 @@ def main():
         samfile_reads_low_mapq = pysam.Samfile(path_DIR+file_name_root+"_out_low_mapq_reads.bam", "wb", template=samfile)
         samfile_unmmaped_reads = pysam.Samfile(path_DIR+file_name_root+"_out_unmmaped_reads.bam", "wb", template=samfile)
     
-    for (counter, read) in enumerate(samfile.fetch(until_eof = True)):
-        if counter%1000000==0: print "procesed",counter/1000000,"M reads"
+    for (counter, read) in enumerate(samfile.fetch('chr11', 55000000, 99000000)):#until_eof = True)):
+        if not silent: 
+            if counter%1000000==0: print "procesed",counter/1000000,"M reads"
         if read.is_unmapped:
             count_unmapped+=1
+            #is_spike(read.seq)
+            #if read.seq in spikes:
             "check_for_spike(read) ... check forspikes"
             if bam_out: samfile_unmmaped_reads.write(read)
             continue
@@ -136,8 +160,8 @@ def main():
                 methylated=True
             else:
                 SmaI_side=None #save junk -> samfile_not_SmaI_read
-
-        SmaI_side_key=("chr"+str(read.tid),SmaI_side)
+        #samfile.getrname(read.tid)
+        SmaI_side_key=(samfile.getrname(read.tid),SmaI_side)
 
         if SmaI_side_key in SmaI_DB:
             if read.mapq > mapq:
@@ -152,7 +176,16 @@ def main():
         else:
             count_non_SmalI+=1
             if bam_out: samfile_not_SmaI_read.write(read) #saving junk file
-
+    
+    #print "last read key: {}\t{}".format(*SmaI_side_key)
+    #print "read:", read
+    #print "read.tid:", read.tid
+    #print "read.rlen:", read.rlen
+    #print "read.rname:", read.rname
+    #print "read.rnext:", read.rnext
+    #print "read.mrnm:", read.mrnm
+    #print "samfile.getrname(read.tid):", samfile.getrname(read.tid)
+    
     samfile.close()
     try:
         samfile_used_reads.close()
@@ -161,21 +194,21 @@ def main():
         samfile_unmmaped_reads.close()
     except: pass
 
-    print
+    if not silent: print
     count_total = counter+1
     count_mapped = count_read_pass+count_reads_low_mapq+count_non_SmalI # count_total-count_unmapped,
 
-    print count_total, "total number of reads"
-    print
-    print "{} reads unpapped => {:.3f} %".format(count_unmapped, count_unmapped/count_total*100 )
-    print "{} reads mapped => {:.3f} %".format(count_mapped, (count_total-count_unmapped)/count_total*100 )
-    print "{} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 )
-    print "%s reads under %s MAPQ quality limit => %.3f %% of mapped  %.3f %% of total" %(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100)
-    print
-    print "%s of mapped reads are NOT in SmaI database => %.4f %% of mapped or %.4f %% of total" %(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100)
-    print
-    print "count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped)
-    print "mapped + unmapped -> %s + %s = %s == total -> %s" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total)
+    if not silent: print count_total, "total number of reads"
+    if not silent: print
+    if not silent: print "{} reads unpapped => {:.3f} %".format(count_unmapped, count_unmapped/count_total*100 )
+    if not silent: print "{} reads mapped => {:.3f} %".format(count_mapped, (count_total-count_unmapped)/count_total*100 )
+    if not silent: print "{} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 )
+    if not silent: print "%s reads under %s MAPQ quality limit => %.3f %% of mapped  %.3f %% of total" %(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100)
+    if not silent: print
+    if not silent: print "%s of mapped reads are NOT in SmaI database => %.4f %% of mapped or %.4f %% of total" %(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100)
+    if not silent: print
+    if not silent: print "count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped)
+    if not silent: print "mapped + unmapped -> %s + %s = %s == total -> %s" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total)
     
     ###### Writing stats into the file ###### hack for now but it's ugly, needs to be rewritten
     stats=open(file_name_root+'_stats.txt', 'w')
@@ -190,8 +223,6 @@ def main():
     stats.write("mapped + unmapped -> %s + %s = %s == total -> %s\n" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total))
     stats.close()
 
-
-    print
     with open(file_name_root+'_SmaI_sites.txt', 'w') as output:
         for key, value in SmaI_DB.iteritems():
             percentage = percent(value['M'], value['U'])
@@ -207,7 +238,7 @@ def main():
 
 #sys.exit("\nOK, good up here\n")
 if __name__ == "__main__":
-    import timex as tx
-    start, startLocal=tx.startTime()
+    #import timex as tx
+    #start, startLocal=tx.startTime()
     main()
-    tx.stopTime(start,startLocal)
+    #tx.stopTime(start,startLocal)
