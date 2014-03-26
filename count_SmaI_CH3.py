@@ -130,7 +130,7 @@ def main():
         samfile_reads_low_mapq = pysam.Samfile(path_DIR+file_name_root+"_out_low_mapq_reads.bam", "wb", template=samfile)
         samfile_unmmaped_reads = pysam.Samfile(path_DIR+file_name_root+"_out_unmmaped_reads.bam", "wb", template=samfile)
     
-    for (counter, read) in enumerate(samfile.fetch('chr11', 55000000, 99000000)):#until_eof = True)):
+    for (counter, read) in enumerate(samfile.fetch(until_eof = True)):
         if not silent: 
             if counter%1000000==0: print "procesed",counter/1000000,"M reads"
         if read.is_unmapped:
