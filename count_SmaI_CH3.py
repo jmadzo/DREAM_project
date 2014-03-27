@@ -15,13 +15,15 @@ chr1    20205   20207   None    SmaI_hg19_2 0   0
 """
 from __future__ import division
 __version__ = '1.0'
-__author__ = 'Fels team'
+__author__ = "JP Issa's lab"
 
 import sys
 import argparse
 import pysam
 import os.path
 import collections
+import re
+from subprocess import Popen
 
 def extractFileName(input_file_path):
     '''extract file name from shell command when longer path is provided'''
@@ -40,6 +42,24 @@ def percent(M,U):
     finally:
         return ratio
 
+def spike_checker(read_sequence):
+    '''Check if unmapped read sequence is in the spike database, if yes increase the methylation counter of match spike'''
+    if read_sequence[:5]=="CCGGG":
+        status="M"
+        sequence_query=read_sequence[2:]
+    elif read_sequence[:3]=="GGG":
+        status="U"
+        sequence_query=read_sequence
+    else:
+        status=None
+        return None
+    
+    seq=re.compile(sequence_query)
+    for spike in db_spikes:
+        if seq.search(db_spikes[spike].get('seq')):
+            db_spikes[spike][status]+=1
+    return None
+
 def main():
     '''main function '''
     ###################### check command line arguments ############################################
@@ -48,13 +68,15 @@ def main():
     ##############################  parsing command line arguments  ################################
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-i', '--input_file', action='store', dest='input_file', help='input bam file')
-    parser.add_argument('-g','--genome_table',action='store', dest='genome_table', help='table with RE side position for accessed genome build',default="SmaI_sites_keys_hg19.txt")
+    parser.add_argument('-g','--genome',action='store', dest='genome_table', help='table with RE side position for accessed genome build',default="SmaI_sites_keys_hg19.txt")
     parser.add_argument('-q', '--mapq', action='store', dest='mapq',type=int, help='filter MAPQ reads quality default=5',default=5)
     parser.add_argument('-bed','--ouput_bed', action='store_true', help='ouput table will be in bed like format')
     parser.add_argument('-v', '--verbose', action='store_true', help='increase output verbosity on the screen')
     parser.add_argument('-bam','--ouput_bam', action='store_true', help='ouput BAM files with reads falling into use/low_quality/unmap reads' )
-    parser.add_argument('-s','--silent', action='store_true', help='run in sciente mode (no screen output)')
-    #parser.add_argument('-bowtie', action='store', dest='bowtie_par', help='add bowtie parameters input files and output file include=')
+    parser.add_argument('-s','--silent', action='store_false', help='run in sciente mode (no screen output)')
+    parser.add_argument('-n', '--no_header', action='store_false', help='prints file output without header')
+    parser.add_argument('-spike', action='store', dest='spike_file', help='imput file with spike name and sequencies', default="spikes.tab")
+    parser.add_argument('-bowtie', action='store', dest='bowtie_par', help='add bowtie parameters input files and output file include=')
 
     command_line=parser.parse_args()
     input_file_path=command_line.input_file
@@ -64,24 +86,31 @@ def main():
     on_screen=command_line.verbose
     bam_out=command_line.ouput_bam
     silent=command_line.silent
-    #bowtie_parameters=command_line.bowtie_par
+    no_header=command_line.no_header
+    spike_file = command_line.spike_file
+    bowtie_parameters=command_line.bowtie_par
 
-
-
+    header=(True and no_header)
 
     ###### Bowtie call ########
-    #if bowtie_parameters:
-    #    command_bowtie= "bowtie2 " + bowtie_parameters #+ " | samtools view -bS - | samtools sort - fighetta.bam"
-    #    print command_bowtie
-    #    proc = Popen(command_bowtie, shell=True)
-    #    proc.wait()
-    #    print "done"
-        
-        # input_file_path asigne to output file
+    if bowtie_parameters:
+        command_bowtie= "bowtie2 " + bowtie_parameters #+ " | samtools view -bS - | samtools sort - fighetta.bam"
+        print command_bowtie
+        bowie_output=re.compile('\w+.[bs]am')
+        input_file_path = re.search(bowie_output,bowtie_parameters).group()
+        print "\nexpected output file: %s\n" % input_file_path
 
+        try:
+            proc = Popen(command_bowtie, shell=True)
+            proc.wait()
+            print "done"
+            print
+            
+        except Exception, e:
+            print "bowtie did't run"
+            raise e
+            sys.exit("\nbowtie did't run\n")
 
-    #else:
-    #    pass
     ###### parse file name ######
     file_name = extractFileName(input_file_path)
     file_name_root, file_ext = splitFileName(file_name)
@@ -93,7 +122,10 @@ def main():
     ##################################################################################################
 
     ###### Open file ######
-    samfile = pysam.Samfile(file_name, open_mode)
+    try:
+        samfile = pysam.Samfile(file_name, open_mode)
+    except IOError as ioe:
+        sys.exit("Whoops I got BAM/SAM file error: {}\nCheck your speling\nIf you ran -bowtie option, there is good chance it didn't run".format(ioe))
     
     ###### some pysam file stats, this is not important, would be deleted  ######
     #print "samfile.filename:", samfile.filename
@@ -103,7 +135,7 @@ def main():
     #header = samfile.header
     #print "samfile.header:\n", samfile.header
 
-    if not silent: print "\nitetare thru reads:"
+    if silent: print "\nitetare thru reads:"
 
     ###### open SmaI side file and create ordered dictionary/hash ######
     try:
@@ -120,10 +152,19 @@ def main():
     count_non_SmalI=0
     count_unmapped = 0
     count_read_pass = 0
-    #g=open(file_name_root+"keys_from_scripy.txt","w")
+
+    ###### open spikes file and create spike DB ######
+    global db_spikes
+    try:
+        spk=open(spike_file,"r")
+        spike_list=[line.strip().split() for line in spk]
+        db_spikes={name:{'seq':sequence,'M':0,'U':0} for name,sequence in spike_list}
+    except:
+        db_spikes = {'None': {'M': 0,'U': 0,'seq': 'NNNNNNNNNNNNNNN..........NNNNNNNNNNNNNNN'}}
+
     if bam_out:
         day_stapm="_"+tx.today()
-        path_DIR="BAM_"+file_name_root+day_stapm+"/"
+        path_DIR=file_name_root+"_BAM_"+day_stapm+"/"
         if not os.path.exists(path_DIR): os.mkdir(path_DIR)
         samfile_used_reads = pysam.Samfile(path_DIR+file_name_root+"_out_used_reads.bam", "wb", template=samfile)
         samfile_not_SmaI_read = pysam.Samfile(path_DIR+file_name_root+"_out_not_SmaI_read.bam", "wb", template=samfile)
@@ -131,13 +172,11 @@ def main():
         samfile_unmmaped_reads = pysam.Samfile(path_DIR+file_name_root+"_out_unmmaped_reads.bam", "wb", template=samfile)
     
     for (counter, read) in enumerate(samfile.fetch(until_eof = True)):
-        if not silent: 
-            if counter%1000000==0: print "procesed",counter/1000000,"M reads"
+        if silent and counter%1000000==0: print "procesed",counter/1000000,"M reads"
         if read.is_unmapped:
             count_unmapped+=1
-            #is_spike(read.seq)
-            #if read.seq in spikes:
-            "check_for_spike(read) ... check forspikes"
+            ''' NOW CHECKING oif it's in spike DB, if yes increase spike M or U counter'''
+            spike_checker(read.seq)
             if bam_out: samfile_unmmaped_reads.write(read)
             continue
 
@@ -160,7 +199,7 @@ def main():
                 methylated=True
             else:
                 SmaI_side=None #save junk -> samfile_not_SmaI_read
-        #samfile.getrname(read.tid)
+
         SmaI_side_key=(samfile.getrname(read.tid),SmaI_side)
 
         if SmaI_side_key in SmaI_DB:
@@ -194,51 +233,68 @@ def main():
         samfile_unmmaped_reads.close()
     except: pass
 
-    if not silent: print
+    if silent: print
     count_total = counter+1
     count_mapped = count_read_pass+count_reads_low_mapq+count_non_SmalI # count_total-count_unmapped,
 
-    if not silent: print count_total, "total number of reads"
-    if not silent: print
-    if not silent: print "{} reads unpapped => {:.3f} %".format(count_unmapped, count_unmapped/count_total*100 )
-    if not silent: print "{} reads mapped => {:.3f} %".format(count_mapped, (count_total-count_unmapped)/count_total*100 )
-    if not silent: print "{} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 )
-    if not silent: print "%s reads under %s MAPQ quality limit => %.3f %% of mapped  %.3f %% of total" %(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100)
-    if not silent: print
-    if not silent: print "%s of mapped reads are NOT in SmaI database => %.4f %% of mapped or %.4f %% of total" %(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100)
-    if not silent: print
-    if not silent: print "count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped)
-    if not silent: print "mapped + unmapped -> %s + %s = %s == total -> %s" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total)
+    if silent: 
+        print "{:,} total number of reads".format(count_total)
+        print
+        print "{:,} reads unpapped => {:.3f} %".format(count_unmapped, count_unmapped/count_total*100 )
+        print "{:,} reads mapped => {:.3f} %".format(count_mapped, (count_total-count_unmapped)/count_total*100 )
+        print "{:,} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 )
+        print "{:,} reads under {} MAPQ quality limit => {:.3f} % of mapped  {:.3f} % of total".format(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100)
+        print "{:,} of mapped reads are NOT in SmaI database => {:.4f} % of mapped or {:.4f} % of total".format(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100)
+        print
+        print "reads pass mapq:\t{} \nreads low mapq:\t{} \nnon SmaI:\t{} \n".format(count_read_pass, count_reads_low_mapq, count_non_SmalI)
+        print "mapped\t{} \nunmapped:\t{} \ntotal:\t{} \n".format(count_mapped, count_unmapped, count_total)
+        print
     
     ###### Writing stats into the file ###### hack for now but it's ugly, needs to be rewritten
     stats=open(file_name_root+'_stats.txt', 'w')
     stats.write("{} reads unpapped => {:.3f} %\n".format(count_unmapped, count_unmapped/count_total*100 ))
     stats.write("{} reads mapped => {:.3f} %\n".format(count_mapped, (count_total-count_unmapped)/count_total*100 ))
     stats.write("{} reads above {} MAPQ quality limit => {:.3f} % of mapped or {:.3f} % of total\n".format(count_read_pass, mapq, count_read_pass/count_mapped*100, count_read_pass/count_total*100 ))
-    stats.write("%s reads under %s MAPQ quality limit => %.3f %% of mapped  %.3f %% of total\n" %(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100))
-    stats.write("\n")
-    stats.write("%s of mapped reads are NOT in SmaI database => %.4f %% of mapped or %.4f %% of total\n" %(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100))
+    stats.write("{} reads under {} MAPQ quality limit => {:.3f} % of mapped  {:.3f} % of total\n".format(count_reads_low_mapq, mapq, count_reads_low_mapq/count_mapped*100, (count_reads_low_mapq/count_total)*100))
+    stats.write("{} of mapped reads are NOT in SmaI database => {:.4f} % of mapped or {:.4f} % of total\n".format(count_non_SmalI, count_non_SmalI/count_mapped*100 ,(count_non_SmalI/count_total)*100))
     stats.write("\n")   
-    stats.write("count_read_pass + count_reads_low_mapq + count_non_SmalI ->  %s + %s + %s = %s  ==  mapped -> %s\n" %(count_read_pass, count_reads_low_mapq, count_non_SmalI, (count_read_pass+count_reads_low_mapq+count_non_SmalI) , count_mapped))
-    stats.write("mapped + unmapped -> %s + %s = %s == total -> %s\n" %(count_mapped, count_unmapped , count_mapped+count_unmapped, count_total))
+    stats.write("reads pass mapq:\t{:} \nreads low mapq:\t{:} \nnon SmaI:\t{:} \n".format(count_read_pass, count_reads_low_mapq, count_non_SmalI))
+    stats.write("mapped:\t{:} \nunmapped:\t{:} \ntotal:\t{:} \n".format(count_mapped, count_unmapped, count_total))
     stats.close()
 
     with open(file_name_root+'_SmaI_sites.txt', 'w') as output:
+        if header and bed_like:
+            output.write('chr\tstart\tendt\percent\tSmaI_ID\t5mC\tC\t{4}\ttotal\n')
+        elif header:
+            output.write('SmaI_ID\tchr\tpos\t5mC\tC\tpercent\ttotal\n')
+        else: pass
+
         for key, value in SmaI_DB.iteritems():
             percentage = percent(value['M'], value['U'])
             coverage = value['M']+value['U']
-            if on_screen:
-                print '{0}\t{1}'.format(*key),"\t{ID}\t{M}\t{U}".format(**value),"\t{}\t{}".format(percentage, coverage)
             if bed_like:
                 chrom,pos = key
-                output.write('{0}\t{1}\t{2}\t{3}\t{ID}\t{M}\t{U}\t{4}'.format(chrom, pos-2, pos, percentage, coverage,**value)+"\n") # now prints CpG to access CCCGGG: pos-4, pos+2
+                output.write('{0}\t{1}\t{2}\t{3}\t{ID}\t{M}\t{U}\t{4}\n'.format(chrom, pos-2, pos, percentage, coverage,**value)) # now prints CpG to access CCCGGG: pos-4, pos+2
             else:
-                output.write('{ID}\t{2}\t{3}\t{M}\t{U}\t{0}\t{1}'.format(percentage, coverage, *key,**value)+"\n")
+                output.write('{ID}\t{2}\t{3}\t{M}\t{U}\t{0}\t{1}\n'.format(percentage, coverage, *key,**value))
+            if on_screen:
+                print '{0}\t{1}'.format(*key),"\t{ID}\t{M}\t{U}".format(**value),"\t{}\t{}".format(percentage, coverage)
 
+    with open(file_name_root+'_SmaI_spikes.txt', 'w') as spike_output:
+        if header:
+            spike_output.write('{0:10}\t{1:6}\t{2:6}\t{3:6}\n'.format('Spike_Name ','5mC','C','%'))
+        if silent:
+            print '{0:10}\t{1:6}\t{2:6}\t{3:6}'.format('Spike_Name','5mC','C','%')
+
+        for key,value in db_spikes.items():
+            percentage = percent(value['M'], value['U'])
+            spike_output.write('{0:10}\t{M:6d}\t{U:6d}\t{1}\n'.format(key, percentage, **value))
+            if silent:
+                print '{0:10}\t{M:6d}\t{U:6d}\t{1}'.format(key, percentage, **value)
 
 #sys.exit("\nOK, good up here\n")
 if __name__ == "__main__":
-    #import timex as tx
+    import timex as tx
     #start, startLocal=tx.startTime()
     main()
-    #tx.stopTime(start,startLocal)
+    # tx.stopTime(start,startLocal)
