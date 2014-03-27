@@ -73,7 +73,7 @@ def main():
     parser.add_argument('-bed','--ouput_bed', action='store_true', help='ouput table will be in bed like format')
     parser.add_argument('-v', '--verbose', action='store_true', help='increase output verbosity on the screen')
     parser.add_argument('-bam','--ouput_bam', action='store_true', help='ouput BAM files with reads falling into use/low_quality/unmap reads' )
-    parser.add_argument('-s','--silent', action='store_false', help='run in sciente mode (no screen output)')
+    parser.add_argument('-s','--silent', action='store_false', help='run in silent mode (no screen output)')
     parser.add_argument('-n', '--no_header', action='store_false', help='prints file output without header')
     parser.add_argument('-spike', action='store', dest='spike_file', help='imput file with spike name and sequencies', default="spikes.tab")
     parser.add_argument('-bowtie', action='store', dest='bowtie_par', help='add bowtie parameters input files and output file include=')
@@ -125,7 +125,7 @@ def main():
     try:
         samfile = pysam.Samfile(file_name, open_mode)
     except IOError as ioe:
-        sys.exit("Whoops I got BAM/SAM file error: {}\nCheck your speling\nIf you ran -bowtie option, there is good chance it didn't run".format(ioe))
+        sys.exit("BAM/SAM file error: {}\nCheck spelling of file name \nIf you ran -bowtie option, there is good chance it didn't run".format(ioe))
     
     ###### some pysam file stats, this is not important, would be deleted  ######
     #print "samfile.filename:", samfile.filename
@@ -172,10 +172,10 @@ def main():
         samfile_unmmaped_reads = pysam.Samfile(path_DIR+file_name_root+"_out_unmmaped_reads.bam", "wb", template=samfile)
     
     for (counter, read) in enumerate(samfile.fetch(until_eof = True)):
-        if silent and counter%1000000==0: print "procesed",counter/1000000,"M reads"
+        if silent and counter%1000000==0: print "processed",counter/1000000,"M reads"
         if read.is_unmapped:
             count_unmapped+=1
-            ''' NOW CHECKING oif it's in spike DB, if yes increase spike M or U counter'''
+            ''' spike_checker function check if read is in spike DB, if yes increase spike's M or U counter'''
             spike_checker(read.seq)
             if bam_out: samfile_unmmaped_reads.write(read)
             continue
