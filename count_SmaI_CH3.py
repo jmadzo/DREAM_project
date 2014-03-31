@@ -36,14 +36,15 @@ def splitFileName(file_name):
 def percent(M,U):
     '''From number of methylated and unmethylated reads calculates precentage of methylC reads handles ZeroDivisionError. No reads output: None'''
     try:
-        ratio= M/(M+U)*100
+        ratio= round(M/(M+U)*100,2)
     except ZeroDivisionError:
         ratio=None
     finally:
         return ratio
 
-def spike_checker(read_sequence):
+def spike_checker(read, samfile_spike_reads, bam_out=False):
     '''Check if unmapped read sequence is in the spike database, if yes increase the methylation counter of match spike'''
+    read_sequence=read.seq
     if read_sequence[:5]=="CCGGG":
         status="M"
         sequence_query=read_sequence[2:]
@@ -58,6 +59,8 @@ def spike_checker(read_sequence):
     for spike in db_spikes:
         if seq.search(db_spikes[spike].get('seq')):
             db_spikes[spike][status]+=1
+            if bam_out: samfile_spike_reads.write(read)
+
     return None
 
 def main():
@@ -75,7 +78,7 @@ def main():
     parser.add_argument('-bam','--ouput_bam', action='store_true', help='ouput BAM files with reads falling into use/low_quality/unmap reads' )
     parser.add_argument('-s','--silent', action='store_false', help='run in silent mode (no screen output)')
     parser.add_argument('-n', '--no_header', action='store_false', help='prints file output without header')
-    parser.add_argument('-spike', action='store', dest='spike_file', help='imput file with spike name and sequencies', default="spikes.tab")
+    parser.add_argument('-spike', action='store', dest='spike_file', help='imput file with spike name and sequencies', default=None)
     parser.add_argument('-bowtie', action='store', dest='bowtie_par', help='add bowtie parameters input files and output file include=')
 
     command_line=parser.parse_args()
@@ -91,6 +94,7 @@ def main():
     bowtie_parameters=command_line.bowtie_par
 
     header=(True and no_header)
+    print bool(spike_file)
 
     ###### Bowtie call ########
     if bowtie_parameters:
@@ -170,13 +174,17 @@ def main():
         samfile_not_SmaI_read = pysam.Samfile(path_DIR+file_name_root+"_out_not_SmaI_read.bam", "wb", template=samfile)
         samfile_reads_low_mapq = pysam.Samfile(path_DIR+file_name_root+"_out_low_mapq_reads.bam", "wb", template=samfile)
         samfile_unmmaped_reads = pysam.Samfile(path_DIR+file_name_root+"_out_unmmaped_reads.bam", "wb", template=samfile)
+    if bool(spike_file) and bam_out:
+        samfile_spike_reads = pysam.Samfile(path_DIR+file_name_root+"_out_spike_reads.bam", "wb", template=samfile)
+    else:
+        samfile_spike_reads = None
     
     for (counter, read) in enumerate(samfile.fetch(until_eof = True)):
         if silent and counter%1000000==0: print "processed",counter/1000000,"M reads"
         if read.is_unmapped:
             count_unmapped+=1
             ''' spike_checker function check if read is in spike DB, if yes increase spike's M or U counter'''
-            spike_checker(read.seq)
+            if bool(spike_file): spike_checker(read, samfile_spike_reads, bam_out)
             if bam_out: samfile_unmmaped_reads.write(read)
             continue
 
@@ -231,6 +239,7 @@ def main():
         samfile_reads_low_mapq.close()
         samfile_not_SmaI_read.close()
         samfile_unmmaped_reads.close()
+        samfile_spike_reads.close()
     except: pass
 
     if silent: print
@@ -279,18 +288,18 @@ def main():
                 output.write('{ID}\t{2}\t{3}\t{M}\t{U}\t{0}\t{1}\n'.format(percentage, coverage, *key,**value))
             if on_screen:
                 print '{0}\t{1}'.format(*key),"\t{ID}\t{M}\t{U}".format(**value),"\t{}\t{}".format(percentage, coverage)
-
-    with open(file_name_root+'_SmaI_spikes.txt', 'w') as spike_output:
-        if header:
-            spike_output.write('{0:10}\t{1:6}\t{2:6}\t{3:6}\n'.format('Spike_Name ','5mC','C','%'))
-        if silent:
-            print '{0:10}\t{1:6}\t{2:6}\t{3:6}'.format('Spike_Name','5mC','C','%')
-
-        for key,value in db_spikes.items():
-            percentage = percent(value['M'], value['U'])
-            spike_output.write('{0:10}\t{M:6d}\t{U:6d}\t{1}\n'.format(key, percentage, **value))
+    if bool(spike_file):
+        with open(file_name_root+'_SmaI_spikes.txt', 'w') as spike_output:
+            if header:
+                spike_output.write('{0:10}\t{1:6}\t{2:6}\t{3:6}\n'.format('Spike_Name ','5mC','C','%'))
             if silent:
-                print '{0:10}\t{M:6d}\t{U:6d}\t{1}'.format(key, percentage, **value)
+                print '{0:10}\t{1:6}\t{2:6}\t{3:6}'.format('Spike_Name','5mC','C','%')
+
+            for key,value in db_spikes.items():
+                percentage = percent(value['M'], value['U'])
+                spike_output.write('{0:10}\t{M:6d}\t{U:6d}\t{1}\n'.format(key, percentage, **value))
+                if silent:
+                    print '{0:10}\t{M:6d}\t{U:6d}\t{1}'.format(key, percentage, **value)
 
 #sys.exit("\nOK, good up here\n")
 if __name__ == "__main__":
