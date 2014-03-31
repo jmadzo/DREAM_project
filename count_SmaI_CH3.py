@@ -23,7 +23,8 @@ import pysam
 import os.path
 import collections
 import re
-from subprocess import Popen
+from subprocess import Popen, call
+import os
 
 def extractFileName(input_file_path):
     '''extract file name from shell command when longer path is provided'''
@@ -94,7 +95,6 @@ def main():
     bowtie_parameters=command_line.bowtie_par
 
     header=(True and no_header)
-    print bool(spike_file)
 
     ###### Bowtie call ########
     if bowtie_parameters:
@@ -300,6 +300,9 @@ def main():
                 spike_output.write('{0:10}\t{M:6d}\t{U:6d}\t{1}\n'.format(key, percentage, **value))
                 if silent:
                     print '{0:10}\t{M:6d}\t{U:6d}\t{1}'.format(key, percentage, **value)
+
+    if not bool(spike_file):
+        os.system('tail -18 '+file_name_root+'_SmaI_sites.txt' + " > " + file_name_root+'_SmaI_spikes.txt')
 
 #sys.exit("\nOK, good up here\n")
 if __name__ == "__main__":
